@@ -1,0 +1,24 @@
+1) Install tools + Vulkan deps (Ubuntu/Debian)
+sudo apt update
+sudo apt install -y build-essential cmake ninja-build git pkg-config \
+  libvulkan-dev vulkan-tools glslang-tools vulkan-utility-libraries-dev
+
+Sanity check:
+
+ninja --version
+g++ --version
+vulkaninfo --summary
+glslangValidator --version
+2) Clone + build starting-point-2 (the one you edit)
+git clone https://github.com/vblanco20-1/vulkan-guide.git
+cd vulkan-guide
+git checkout starting-point-2
+
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build -j"$(nproc)"
+./bin/engine
+
+When you change shaders:
+
+cmake --build build --target Shaders
+./bin/engine
