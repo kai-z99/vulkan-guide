@@ -14,8 +14,8 @@ git clone https://github.com/vblanco20-1/vulkan-guide.git
 cd vulkan-guide
 git checkout starting-point-2
 
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j"$(nproc)"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug //use cmake gui on windows
+cmake --build build -j"$(nproc)" //f5 on windows
 ./bin/engine
 
 When you change shaders:
