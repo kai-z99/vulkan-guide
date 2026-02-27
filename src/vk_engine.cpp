@@ -181,7 +181,7 @@ void VulkanEngine::init_swapchain()
     VK_CHECK(vkCreateImageView(_device, &rview_info, nullptr, &_drawImage.imageView));
 
     //add to deletion queues
-    _mainDeletionQueue.push_function([=]() 
+    _mainDeletionQueue.push_function([=,this]() 
     {
         vkDestroyImageView(_device, _drawImage.imageView, nullptr);
         vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
@@ -261,7 +261,7 @@ void VulkanEngine::cleanup()
         }
 
         _mainDeletionQueue.flush();
-        
+
         destroy_swapchain();
 
         vkDestroySurfaceKHR(_instance, _surface, nullptr);
@@ -344,10 +344,10 @@ void VulkanEngine::draw()
     VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,get_current_frame()._swapchainSemaphore);
     VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame()._renderSemaphore);   
 
-    VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo,&signalInfo,&waitInfo); 
+    VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo,&signalInfo,&waitInfo); //default
 
     //submit command buffer to the queue and execute it.
-    // _renderFence will now block until the graphic commands finish execution
+    // _renderFence will block until the graphic commands finish execution
     VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
 
     //present to screen
