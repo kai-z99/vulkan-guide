@@ -5,7 +5,6 @@ layout (local_size_x = 16, local_size_y = 16) in;
 //descriptor set 0, binding 0, we have a descriptor for our texture
 layout(rgba16f,set = 0, binding = 0) uniform image2D image;
 
-
 void main() 
 {
     ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
@@ -19,7 +18,7 @@ void main()
         if(gl_LocalInvocationID.x != 0 && gl_LocalInvocationID.y != 0)
         {
             color.x = float(texelCoord.x)/(size.x);
-            color.y = float(texelCoord.y)/(size.y);	
+            color.z = float(texelCoord.y)/(size.y);	
         }
     
         imageStore(image, texelCoord, color);

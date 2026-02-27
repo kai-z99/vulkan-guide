@@ -4,6 +4,7 @@
 #pragma once
 
 #include <vk_types.h>
+#include <vk_descriptors.h>
 
 
 struct DeletionQueue
@@ -56,6 +57,7 @@ public:
 
 	static VulkanEngine& Get();
 
+	//general
 	VkInstance _instance;// Vulkan library handle
 	VkDebugUtilsMessengerEXT _debug_messenger;// Vulkan debug output handle
 	VkPhysicalDevice _chosenGPU;// GPU chosen as the default device
@@ -79,6 +81,16 @@ public:
 	//memoery allocator VMA
 	VmaAllocator _allocator;
 
+	//descriptors
+	DescriptorAllocator globalDescriptorAllocator;
+	VkDescriptorSet _drawImageDescriptors;
+	VkDescriptorSetLayout _drawImageDescriptorLayout;
+
+	//pipeline---
+	//gradient
+	VkPipeline _gradientPipeline;
+	VkPipelineLayout _gradientPipelineLayout;
+
 	//initializes everything in the engine
 	void init();
 
@@ -96,10 +108,12 @@ private:
 	void init_swapchain();
 	void init_commands();
 	void init_sync_structures();
+	void init_descriptors();
+	void init_pipelines();
+	void init_background_pipelines();
+
 	void create_swapchain(uint32_t width, uint32_t height);
 	void destroy_swapchain();
 
 	void draw_background(VkCommandBuffer cmd);
-
-
 };
