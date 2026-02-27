@@ -5,6 +5,27 @@
 
 #include <vk_types.h>
 
+
+struct DeletionQueue
+{
+	std::deque<std::function<void()>> deletors;
+
+	void push_function(std::function<void()>&& func)
+	{
+		deletors.push_back(func);
+	}
+
+	void flush()
+	{
+		for (auto it = deletors.rbegin(); it != deletors.rend(); it++)
+		{
+			(*it)();
+		}
+
+		deletors.clear();
+	}
+};
+
 struct FrameData 
 {
 	VkCommandPool _commandPool;
@@ -12,6 +33,8 @@ struct FrameData
 
 	VkSemaphore _swapchainSemaphore, _renderSemaphore;
 	VkFence _renderFence;
+
+	DeletionQueue _deletionQueue;
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
@@ -39,13 +62,22 @@ public:
 	VkDevice _device; // Vulkan device for commands
 	VkSurfaceKHR _surface;// Vulkan window surface
 
+	//draw resources
+	AllocatedImage _drawImage;
+	VkExtent2D _drawExtent;
+
 	//swapchain
 	VkSwapchainKHR _swapchain;
 	VkFormat _swapchainImageFormat;
-
 	std::vector<VkImage> _swapchainImages;
 	std::vector<VkImageView> _swapchainImageViews;
 	VkExtent2D _swapchainExtent;
+
+	//deletion q
+	DeletionQueue _mainDeletionQueue;
+
+	//memoery allocator VMA
+	VmaAllocator _allocator;
 
 	//initializes everything in the engine
 	void init();
@@ -66,6 +98,8 @@ private:
 	void init_sync_structures();
 	void create_swapchain(uint32_t width, uint32_t height);
 	void destroy_swapchain();
+
+	void draw_background(VkCommandBuffer cmd);
 
 
 };
