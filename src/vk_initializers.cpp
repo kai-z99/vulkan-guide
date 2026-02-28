@@ -132,8 +132,8 @@ VkRenderingAttachmentInfo vkinit::attachment_info(
 
     colorAttachment.imageView = view;
     colorAttachment.imageLayout = layout;
-    colorAttachment.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD; //LOAD: keep data in image; CLEAR: use clear value. (skip loading mem)
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; //draw commands saved
     if (clear) {
         colorAttachment.clearValue = *clear;
     }
