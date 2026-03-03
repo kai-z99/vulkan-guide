@@ -118,6 +118,10 @@ public:
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{0};
 
+	//triangle
+	VkPipelineLayout _trianglePipelineLayout;
+	VkPipeline _trianglePipeline;
+
 	//initializes everything in the engine
 	void init();
 
@@ -141,10 +145,13 @@ private:
 	void init_pipelines();
 	void init_background_pipelines();
 	void init_imgui();
+	//pipelines
+	void init_triangle_pipeline();
 
 	void create_swapchain(uint32_t width, uint32_t height);
 	void destroy_swapchain();
 
 	void draw_background(VkCommandBuffer cmd);
+	void draw_geometry(VkCommandBuffer cmd);
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 };
