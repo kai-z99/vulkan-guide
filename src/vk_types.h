@@ -18,7 +18,6 @@
 #include <fmt/core.h>
 
 #include <glm/mat4x4.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include <glm/vec4.hpp>
 
 
@@ -52,7 +51,6 @@ struct Vertex
 // holds the resources needed for a mesh
 struct GPUMeshBuffers 
 {
-
     AllocatedBuffer indexBuffer;
     AllocatedBuffer vertexBuffer;
     VkDeviceAddress vertexBufferAddress; //so we can access vertexBuffer from AllocatedBuffer.info

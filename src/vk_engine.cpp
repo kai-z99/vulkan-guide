@@ -17,6 +17,7 @@
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"  
+#include <glm/gtx/transform.hpp>
 
 #include <chrono>
 #include <thread>
@@ -195,11 +196,24 @@ void VulkanEngine::init_swapchain()
     VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(_drawImage.imageFormat, _drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
     VK_CHECK(vkCreateImageView(_device, &rview_info, nullptr, &_drawImage.imageView));
 
+    //depth image------------------------
+    _depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
+	_depthImage.imageExtent = drawImageExtent;
+	VkImageUsageFlags depthImageUsages{};
+	depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	VkImageCreateInfo dimg_info = vkinit::image_create_info(_depthImage.imageFormat, depthImageUsages, drawImageExtent);
+	vmaCreateImage(_allocator, &dimg_info, &rimg_allocinfo, &_depthImage.image, &_depthImage.allocation, nullptr);
+	VkImageViewCreateInfo dview_info = vkinit::imageview_create_info(_depthImage.imageFormat, _depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+	VK_CHECK(vkCreateImageView(_device, &dview_info, nullptr, &_depthImage.imageView));
+
     //add to deletion queues
     _mainDeletionQueue.push_function([=,this]() 
     {
-        vkDestroyImageView(_device, _drawImage.imageView, nullptr);
-        vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
+	vkDestroyImageView(_device, _drawImage.imageView, nullptr);
+	vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
+
+	vkDestroyImageView(_device, _depthImage.imageView, nullptr);
+	vmaDestroyImage(_allocator, _depthImage.image, _depthImage.allocation);
     });
 
 }
@@ -280,7 +294,6 @@ void VulkanEngine::init_descriptors()
     };
     //10 descriptor sets in total can be allocated from this pool.
     globalDescriptorAllocator.init_pool(_device, 10, sizes);
-
 
     //---------2. describe the descriptor set's layout--------------------------------
     //make the descriptor set layout for our compute draw
@@ -530,12 +543,12 @@ void VulkanEngine::init_mesh_pipeline()
 	pipelineBuilder.set_multisampling_none();
 	//no blending
 	pipelineBuilder.disable_blending();
-
-	pipelineBuilder.disable_depthtest();
+    //enable depth testing
+	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
 	//connect the image format we will draw into, from draw image
 	pipelineBuilder.set_color_attachment_format(_drawImage.imageFormat);
-	pipelineBuilder.set_depth_format(VK_FORMAT_UNDEFINED);
+	pipelineBuilder.set_depth_format(_depthImage.imageFormat);
 
 	//finally build the pipeline
 	_meshPipeline = pipelineBuilder.build_pipeline(_device);
@@ -646,6 +659,10 @@ void VulkanEngine::init_default_data()
 		destroy_buffer(rectangle.indexBuffer);
 		destroy_buffer(rectangle.vertexBuffer);
 	});
+
+
+    //meshes
+    testMeshes = loadGltfMeshes(this,"assets/basicmesh.glb").value();
 }
 
 void VulkanEngine::cleanup()
@@ -671,7 +688,14 @@ void VulkanEngine::cleanup()
             _frames[i]._deletionQueue.flush();
         }
 
+        for (auto& mesh : testMeshes) 
+        {
+            destroy_buffer(mesh->meshBuffers.indexBuffer);
+            destroy_buffer(mesh->meshBuffers.vertexBuffer);
+        }
+
         _mainDeletionQueue.flush();
+
 
         destroy_swapchain();
 
@@ -719,9 +743,10 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 
     //VkRenderingAttachmentInfo describes the attachment we are rendering into for dynamic rendering
 	VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     //VkRenderingInfo is the info for vkCmdBeginRendering. It needs to know the region we are drawing and the attachments we are drawing into.
-	VkRenderingInfo renderInfo = vkinit::rendering_info(_drawExtent, &colorAttachment, nullptr);
+	VkRenderingInfo renderInfo = vkinit::rendering_info(_windowExtent, &colorAttachment, &depthAttachment);
 
     //start dynamic rendering
 	vkCmdBeginRendering(cmd, &renderInfo);
@@ -754,15 +779,32 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     //Draw rectangle--------------
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipeline);
 
+    //update push constants (buffer pointer and world matrix)
 	GPUDrawPushConstants push_constants;
-	push_constants.worldMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(sinf(_frameNumber / 60.0f) , 0.0f, 0.0f)) * 
-        glm::rotate(glm::mat4(1.0f), (float)_frameNumber / 60.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-	push_constants.vertexBuffer = rectangle.vertexBufferAddress;
 
+	glm::mat4 view = glm::translate(glm::vec3{ 0,0,-5 });
+	// camera projection
+	glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)_drawExtent.width / (float)_drawExtent.height, 10000.f, 0.1f);
+
+	// invert the Y direction on projection matrix so that we are more similar
+	// to opengl and gltf axis
+	projection[1][1] *= -1;
+    push_constants.worldMatrix = projection * view;
+
+	push_constants.vertexBuffer = rectangle.vertexBufferAddress;
+    
 	vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 	vkCmdBindIndexBuffer(cmd, rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+
+    //meshes
+	push_constants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress; //index 2 is monke
+
+	vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+	vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+	vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
 
 	vkCmdEndRendering(cmd);
 }
@@ -795,6 +837,8 @@ void VulkanEngine::draw()
     //begin the command buffer recording. Default indo besides hint to tell vulkan we will use the cmd buffer once.
     VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo)); 
+    _drawExtent.width = _drawImage.imageExtent.width;
+    _drawExtent.height = _drawImage.imageExtent.height;
 
     // transition our main draw image into general layout so we can write into it
     // we will overwrite it all so we dont care about what was the older layout 
@@ -805,6 +849,7 @@ void VulkanEngine::draw()
     //transution from general -> VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL. 
     //Note that this is the VkRenderingAttachmentInfo we defined we would be writing into in our VkRenderingInfo (dynamic rendering info)
     vkutil::transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    vkutil::transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
 	draw_geometry(cmd); //trinagle
                                                 
@@ -813,8 +858,6 @@ void VulkanEngine::draw()
     vkutil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     // execute a copy from the draw image into the swapchain
-    _drawExtent.width = _drawImage.imageExtent.width;
-    _drawExtent.height = _drawImage.imageExtent.height;
     vkutil::copy_image_to_image(cmd, _drawImage.image, _swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
 
     // set swapchain image layout to Attachment Optimal so we can draw GUI it
@@ -918,6 +961,7 @@ GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<V
 	//find the address of the vertex buffer. We give it the VKBuffer.
 	VkBufferDeviceAddressInfo deviceAddressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = newSurface.vertexBuffer.buffer };
 	newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(_device, &deviceAddressInfo);
+
 
 	//create index buffer
 	newSurface.indexBuffer = create_buffer(indexBufferSize, 

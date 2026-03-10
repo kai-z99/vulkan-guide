@@ -33,6 +33,8 @@ public:
 	void set_color_attachment_format(VkFormat format); // _renderInfo, _colorAttachmentformat
 	void set_depth_format(VkFormat format); //_renderInfo
 	void disable_depthtest(); //_depthStencil
+	void enable_depthtest(bool depthWriteEnable, VkCompareOp op);
+
 
     VkPipeline build_pipeline(VkDevice device);
 };
