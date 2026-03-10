@@ -115,20 +115,14 @@ public:
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
 	//pipeline---
-	//gradient
+	//gradient/bg
 	VkPipeline _gradientPipeline;
 	VkPipelineLayout _gradientPipelineLayout;
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{0};
-
-	//triangle
-	VkPipelineLayout _trianglePipelineLayout;
-	VkPipeline _trianglePipeline;
-
 	//mesh
 	VkPipelineLayout _meshPipelineLayout;
 	VkPipeline _meshPipeline;
-	GPUMeshBuffers rectangle;
 	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
 
