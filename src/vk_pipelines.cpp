@@ -120,6 +120,37 @@ void PipelineBuilder::disable_blending()
     _colorBlendAttachment.blendEnable = VK_FALSE;
 }
 
+void PipelineBuilder::enable_blending_additive()
+{
+    //outColor = srcColor     * srcColorBlendFactor <op>     dstColor * dstColorBlendFactor;
+    //         = srcColor.rgb * srcColor.a           +   dstColor.rgb * 1.0
+    //src: the color we are processing in the pipeline
+    //dst: the current value of the image we are rendering into
+    _colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    _colorBlendAttachment.blendEnable = VK_TRUE;
+    _colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA; //alpha of src
+    _colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE; //1.0
+    _colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    _colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    _colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    _colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+ 
+}
+
+void PipelineBuilder::enable_blending_alphablend()
+{
+    //outColor = srcColor     * srcColorBlendFactor <op> dstColor    * dstColorBlendFactor;
+    //         = srcColor.rgb * srcColor.a            + dstColor.rgb * (1.0 - srcColor.a)
+    _colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    _colorBlendAttachment.blendEnable = VK_TRUE;
+    _colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;           //alpha of src
+    _colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA; // 1 - alpha of source
+    _colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    _colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    _colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    _colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+}
+
 void PipelineBuilder::set_color_attachment_format(VkFormat format)
 {
     _colorAttachmentformat = format;

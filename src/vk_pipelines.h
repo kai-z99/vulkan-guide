@@ -30,11 +30,12 @@ public:
 	void set_cull_mode(VkCullModeFlags cullMode, VkFrontFace frontFace); //_rasterizer
 	void set_multisampling_none(); //_multisampling
 	void disable_blending(); //_colorBlendAttachment
+	void enable_blending_additive();
+	void enable_blending_alphablend();
 	void set_color_attachment_format(VkFormat format); // _renderInfo, _colorAttachmentformat
 	void set_depth_format(VkFormat format); //_renderInfo
 	void disable_depthtest(); //_depthStencil
 	void enable_depthtest(bool depthWriteEnable, VkCompareOp op);
-
 
     VkPipeline build_pipeline(VkDevice device);
 };

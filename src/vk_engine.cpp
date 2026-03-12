@@ -478,7 +478,7 @@ void VulkanEngine::init_mesh_pipeline()
 	//no multisampling
 	pipelineBuilder.set_multisampling_none();
 	//no blending
-	pipelineBuilder.disable_blending();
+	pipelineBuilder.enable_blending_additive();
     //enable depth testing
 	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
@@ -679,8 +679,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     //update push constants (buffer pointer and world matrix)
 	GPUDrawPushConstants push_constants;
 
-	glm::mat4 view = glm::translate(glm::vec3{ 0,0,-5 });
-	// camera projection
+	glm::mat4 view = glm::translate(glm::vec3{ 0,0,-5 }) * glm::rotate(_frameNumber / 60.0f, glm::vec3(0,1,0));
 	glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)_drawExtent.width / (float)_drawExtent.height, 10000.f, 0.1f);
 
 	// invert the Y direction on projection matrix so that we are more similar
@@ -715,7 +714,6 @@ void VulkanEngine::draw()
     VK_CHECK(vkAcquireNextImageKHR(_device, _swapchain, 1000000000, get_current_frame()._swapchainSemaphore, nullptr, &swapchainImageIndex));
 
     //START RENDERING COMMANDS---------------------------------------------------------
-
     VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer; //get this frame's dedicated command buffer
 
     // now that we are sure that the commands finished executing, we can safely
@@ -725,6 +723,7 @@ void VulkanEngine::draw()
     //begin the command buffer recording. Default indo besides hint to tell vulkan we will use the cmd buffer once.
     VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo)); 
+    
     _drawExtent.width = _drawImage.imageExtent.width;
     _drawExtent.height = _drawImage.imageExtent.height;
 
