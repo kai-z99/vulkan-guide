@@ -1,6 +1,6 @@
 #version 450
 
-layout (location = 0) out vec3 outColor;
+layout (location = 0) out vec4 outColor;
 
 void main() 
 {
@@ -20,5 +20,5 @@ void main()
 
 	//output the position of each vertex
     gl_Position = vec4(positions[gl_VertexIndex], 1.0f); //gl_Vertex index will be different for each invocation of the vertex shader.
-	outColor = colors[gl_VertexIndex];
+	outColor = vec4(colors[gl_VertexIndex], 0.0f);
 }

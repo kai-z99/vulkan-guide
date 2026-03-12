@@ -1,7 +1,7 @@
 #version 450
 #extension GL_EXT_buffer_reference : require
 
-layout (location = 0) out vec3 outColor;
+layout (location = 0) out vec4 outColor;
 layout (location = 1) out vec2 outUV;
 
 //same as CPU side
@@ -26,7 +26,7 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer
 layout( push_constant ) uniform constants
 {	
 	mat4 render_matrix;
-	VertexBuffer vertexBuffer;
+	VertexBuffer vertexBuffer; //pointer
 } PushConstants;
 
 void main() 
@@ -36,7 +36,7 @@ void main()
 
 	//output data
 	gl_Position = PushConstants.render_matrix * vec4(v.position, 1.0f);
-	outColor = v.color.xyz;
+	outColor = v.color;
 	outUV.x = v.uv_x;
 	outUV.y = v.uv_y;
 }
