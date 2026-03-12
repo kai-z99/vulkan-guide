@@ -647,7 +647,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     // VkRenderingInfo is the info for vkCmdBeginRendering. It needs to know the region we are drawing and the attachments we are drawing into.
-    VkRenderingInfo renderInfo = vkinit::rendering_info(_windowExtent, &colorAttachment, &depthAttachment);
+    VkRenderingInfo renderInfo = vkinit::rendering_info(_drawExtent, &colorAttachment, &depthAttachment);
 
     // start dynamic rendering
     vkCmdBeginRendering(cmd, &renderInfo);
