@@ -57,11 +57,11 @@ void VulkanEngine::init()
 
     init_descriptors();
 
-    init_default_data();
-
     init_pipelines();
 
     init_imgui();
+
+    init_default_data();
 
     // everything went fine
     _isInitialized = true;
@@ -293,50 +293,62 @@ void VulkanEngine::init_sync_structures()
 void VulkanEngine::init_descriptors()
 {
     fmt::print("Initializing descriptor sets...\n");
-    //---------1. create a descriptor pool that will hold 10 sets with 1 image each--------------------------------
-    // each descriptor set will have 1 image descriptor. Shape/layout not known yet.
-    std::vector<DescriptorAllocator::PoolSizeRatio> sizes =
-        {
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1} //desciptor type is an image resource
-        };
-    // 10 descriptor sets in total can be allocated from this pool.
-    globalDescriptorAllocator.init_pool(_device, 10, sizes);
+    
+    //Create a global descriptor allocator.
+    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes =
+    {
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1}, 
+    	{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2}
+    };
+    globalDescriptorAllocator.init(_device, 10, sizes); //10 sets can be allocated 
 
-    //---------2. describe the descriptor set's layout--------------------------------
-    // make the descriptor set layout for our compute draw
+    //  COMPUTE PIPELINE: make the descriptor set layout for our compute draw
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // binding index 0 of the desciptor set being described holds an image
         _drawImageDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT);
     }
 
-    //---------3. Allocate a single descriptor set from our pool using our description----------------------------
-    // We know the shape now!
-    // we use 1 of the 10 max sets we can allocate.
+    // GLTF PIPELINE: descriptor for per frame resources
+    {
+        DescriptorLayoutBuilder builder;
+        builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER); //ubo
+        _gpuSceneDataDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
+
+    // MONKEY PIPELINE: descriptor to access a texture from the monke shader
+    {
+        DescriptorLayoutBuilder builder;
+        builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); //sampler2d
+        _singleImageDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
+
+    // allocate and write the image for the compute draw descriptor now because we wont need to update it.
+    // for other ones, we do it in the draw loop.
     _drawImageDescriptors = globalDescriptorAllocator.allocate(_device, _drawImageDescriptorLayout);
+    {
+        DescriptorWriter writer;
 
-    //---------4. write the image into the descriptor set we allocated.--------------------------------
-    // Since we know the shape, (1 image at binding index 0), we finally actually bind our image there.
+        writer.write_image(0, 
+            _drawImage.imageView, 
+            VK_NULL_HANDLE, 
+            VK_IMAGE_LAYOUT_GENERAL,            //usage state: compute shader
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); //descriptor type is an image resource
+        
+        writer.update_set(_device, _drawImageDescriptors);
+    }
 
-    DescriptorWriter writer;
-
-    writer.write_image(0, 
-        _drawImage.imageView, 
-        VK_NULL_HANDLE, 
-        VK_IMAGE_LAYOUT_GENERAL,            //usage state: compute shader
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); //descriptor type is an image resource
-    
-    writer.update_set(_device, _drawImageDescriptors);
-
-    //---------5. cleanup.--------------------------------
-    // make sure both the descriptor allocator and the new layout get cleaned up properly
+    //cleanup
     _mainDeletionQueue.push_function([&]()
-                                     {
-        globalDescriptorAllocator.destroy_pool(_device);
-        vkDestroyDescriptorSetLayout(_device, _drawImageDescriptorLayout, nullptr); });
+    {
+        globalDescriptorAllocator.destroy_pools(_device);
+		vkDestroyDescriptorSetLayout(_device, _drawImageDescriptorLayout, nullptr);
+		vkDestroyDescriptorSetLayout(_device, _singleImageDescriptorLayout, nullptr);
+		vkDestroyDescriptorSetLayout(_device, _gpuSceneDataDescriptorLayout, nullptr);
+    });
 
-
-    //per frame descriptor allocator
+    //make our per frame descriptor allocators. We use these each frame to allocate descriptor sets for the per frame resources.
 	for (int i = 0; i < FRAME_OVERLAP; i++) 
     {
 		// create a descriptor pool
@@ -356,20 +368,6 @@ void VulkanEngine::init_descriptors()
 			_frames[i]._frameDescriptors.destroy_pools(_device);
 		});
 	}
-
-    //we will create the following descriptor set every frame, so just do the layout for now.
-    {
-        DescriptorLayoutBuilder builder;
-        builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER); //ubo
-        _gpuSceneDataDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-    }
-
-    //to access image sampler
-    {
-        DescriptorLayoutBuilder builder;
-        builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); //sampler2d
-        _singleImageDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_FRAGMENT_BIT);
-    }
 }
 
 void VulkanEngine::init_pipelines()
@@ -377,6 +375,7 @@ void VulkanEngine::init_pipelines()
     fmt::print("Initializing pipelines...\n");
     init_background_pipelines();
     init_mesh_pipeline();
+    metalRoughMaterial.build_pipelines(this);
 }
 
 void VulkanEngine::init_background_pipelines()
@@ -489,7 +488,7 @@ void VulkanEngine::init_mesh_pipeline()
     bufferRange.size = sizeof(GPUDrawPushConstants); // world matrix and vertex buffer pointer
     bufferRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-    // bind the descriptor layout for the sampler 
+    // bind the descriptor layout / push constants to pipeline 
     VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
     pipeline_layout_info.pPushConstantRanges = &bufferRange;
     pipeline_layout_info.pushConstantRangeCount = 1;
@@ -650,6 +649,34 @@ void VulkanEngine::init_default_data()
 		destroy_image(_blackImage);
 		destroy_image(_errorCheckerboardImage);
 	});
+
+    //create a default material for the gltf roughness pipeline-------------------------
+
+    GLTFMetallic_Roughness::MaterialResources materialResources;
+
+	//default the material textures
+	materialResources.colorImage = _whiteImage;
+	materialResources.colorSampler = _defaultSamplerLinear;
+	materialResources.metalRoughImage = _whiteImage;
+	materialResources.metalRoughSampler = _defaultSamplerLinear;
+    //stil need  materialResources.dataBuffer
+
+	//write the uniform buffer for the material data (materialResources.dataBuffer)
+	AllocatedBuffer materialConstants = create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	GLTFMetallic_Roughness::MaterialConstants* sceneUniformData = (GLTFMetallic_Roughness::MaterialConstants*)materialConstants.allocation->GetMappedData();
+	sceneUniformData->colorFactors = glm::vec4{1,1,1,1};
+	sceneUniformData->metal_rough_factors = glm::vec4{1,0.5,0,0};
+
+	_mainDeletionQueue.push_function([=, this]() 
+    {
+		destroy_buffer(materialConstants);
+	});
+
+	materialResources.dataBuffer = materialConstants.buffer;
+	materialResources.dataBufferOffset = 0;
+
+	defaultData = metalRoughMaterial.write_material(_device, MaterialPass::MainColor, materialResources, globalDescriptorAllocator);
+
 }
 
 void VulkanEngine::cleanup()
@@ -757,16 +784,16 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     scissor.extent.height = _drawExtent.height;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    //bind a texture
+    //Create/bind descriptor set with layout from init to bind a texture -------------------------------------------
 	VkDescriptorSet imageSet = get_current_frame()._frameDescriptors.allocate(_device, _singleImageDescriptorLayout);
 	{
-		DescriptorWriter writer;
+        //checkerboard sampler at index 0
+		DescriptorWriter writer; 
 		writer.write_image(0, _errorCheckerboardImage.imageView, _defaultSamplerNearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-
 		writer.update_set(_device, imageSet);
 	}
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
-
+    //----------------------------------------------------------------------------------------------------
 
     // update push constants (buffer pointer and world matrix)-------------------------------------------
     GPUDrawPushConstants push_constants;
@@ -781,8 +808,8 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     push_constants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress; // index 2 is monke
     //------------------------------------------------------------------------------------------
 
-
     //CREATE PER-FRAME DESCRIPTOR SET (using layout defined in init)-----------------------------------------
+
     //allocate a new UBO for the scene data
 	AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
@@ -944,92 +971,6 @@ void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView)
     vkCmdEndRendering(cmd);
 }
 
-AllocatedBuffer VulkanEngine::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
-{
-    // Buffer allocation info for vulkan
-    VkBufferCreateInfo bufferInfo = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bufferInfo.pNext = nullptr;
-    bufferInfo.size = allocSize;
-    bufferInfo.usage = usage;
-
-    // allocation info for VMA
-    VmaAllocationCreateInfo vmaallocInfo = {};
-    vmaallocInfo.usage = memoryUsage;                      // we can control where VMA will put the buffer
-    vmaallocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT; // Map the pointer automiatically so we cna write to the memory, as long as buffer
-    // is accasasble from CPU. Will be stored in newBuffer.info
-
-    // allocate the buffer
-    AllocatedBuffer newBuffer;
-    VK_CHECK(vmaCreateBuffer(_allocator, &bufferInfo, &vmaallocInfo, &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info));
-
-    return newBuffer;
-}
-
-void VulkanEngine::destroy_buffer(const AllocatedBuffer &buffer)
-{
-    vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
-}
-
-GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices)
-{
-    const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
-    const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
-
-    GPUMeshBuffers newSurface;
-
-    // create vertex buffer
-    newSurface.vertexBuffer = create_buffer(vertexBufferSize,
-                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |           // buffer is an SSBO
-                                                VK_BUFFER_USAGE_TRANSFER_DST_BIT |         // for the next step
-                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, // we will be taking its pointer
-                                            VMA_MEMORY_USAGE_GPU_ONLY);                    // creating on gpu only memory
-
-    // find the address of the vertex buffer. We give it the VKBuffer.
-    VkBufferDeviceAddressInfo deviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = newSurface.vertexBuffer.buffer};
-    newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(_device, &deviceAddressInfo);
-
-    // create index buffer
-    newSurface.indexBuffer = create_buffer(indexBufferSize,
-                                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT | // we will be using this for indexed draws
-                                               VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                           VMA_MEMORY_USAGE_GPU_ONLY);
-
-    // Now we need to create a staging buffer that we can wite to on the CPU, then copy into the GPU only buffers---------------------
-    AllocatedBuffer staging = create_buffer(vertexBufferSize + indexBufferSize,
-                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // copy source
-                                            VMA_MEMORY_USAGE_CPU_ONLY);       // on CPU ram, GPU can read from it
-
-    // Get CPU pointer to staging buffer memory
-    void *data = staging.allocation->GetMappedData();
-
-    // copy vertex buffer
-    memcpy(data, vertices.data(), vertexBufferSize);
-    // copy index buffer (after vertex buffer data)
-    memcpy((char *)data + vertexBufferSize, indices.data(), indexBufferSize);
-
-    // copy staging buffer data -> gpu buffers
-    // Note that immediate submit stalls the CPU with its fence until this op is done. (usually we should put this on a bg thread)
-    immediate_submit([&](VkCommandBuffer cmd)
-                     {
-        //vertex data
-		VkBufferCopy vertexCopy{ 0 };
-		vertexCopy.dstOffset = 0;
-		vertexCopy.srcOffset = 0;
-		vertexCopy.size = vertexBufferSize;
-		vkCmdCopyBuffer(cmd, staging.buffer, newSurface.vertexBuffer.buffer, 1, &vertexCopy);
-
-        //index data
-		VkBufferCopy indexCopy{ 0 };
-		indexCopy.dstOffset = 0;
-		indexCopy.srcOffset = vertexBufferSize; //after vertex data in staging buffer
-		indexCopy.size = indexBufferSize;
-		vkCmdCopyBuffer(cmd, staging.buffer, newSurface.indexBuffer.buffer, 1, &indexCopy); });
-
-    destroy_buffer(staging);
-
-    return newSurface;
-}
-
 void VulkanEngine::run()
 {
     SDL_Event e;
@@ -1130,6 +1071,92 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)> &&f
     VK_CHECK(vkWaitForFences(_device, 1, &_immFence, true, 9999999999));
 }
 
+GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices)
+{
+    const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
+    const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
+    GPUMeshBuffers newSurface;
+
+    // create vertex buffer
+    newSurface.vertexBuffer = create_buffer(vertexBufferSize,
+                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |           // buffer is an SSBO
+                                                VK_BUFFER_USAGE_TRANSFER_DST_BIT |         // for the next step
+                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, // we will be taking its pointer
+                                            VMA_MEMORY_USAGE_GPU_ONLY);                    // creating on gpu only memory
+
+    // find the address of the vertex buffer. We give it the VKBuffer.
+    VkBufferDeviceAddressInfo deviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = newSurface.vertexBuffer.buffer};
+    newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(_device, &deviceAddressInfo);
+
+    // create index buffer
+    newSurface.indexBuffer = create_buffer(indexBufferSize,
+                                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT | // we will be using this for indexed draws
+                                               VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                           VMA_MEMORY_USAGE_GPU_ONLY);
+
+    // Now we need to create a staging buffer that we can wite to on the CPU, then copy into the GPU only buffers---------------------
+    AllocatedBuffer staging = create_buffer(vertexBufferSize + indexBufferSize,
+                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // copy source
+                                            VMA_MEMORY_USAGE_CPU_ONLY);       // on CPU ram, GPU can read from it
+
+    // Get CPU pointer to staging buffer memory
+    void *data = staging.allocation->GetMappedData();
+
+    // copy vertex buffer
+    memcpy(data, vertices.data(), vertexBufferSize);
+    // copy index buffer (after vertex buffer data)
+    memcpy((char *)data + vertexBufferSize, indices.data(), indexBufferSize);
+
+    // copy staging buffer data -> gpu buffers
+    // Note that immediate submit stalls the CPU with its fence until this op is done. (usually we should put this on a bg thread)
+    immediate_submit([&](VkCommandBuffer cmd)
+                     {
+        //vertex data
+		VkBufferCopy vertexCopy{ 0 };
+		vertexCopy.dstOffset = 0;
+		vertexCopy.srcOffset = 0;
+		vertexCopy.size = vertexBufferSize;
+		vkCmdCopyBuffer(cmd, staging.buffer, newSurface.vertexBuffer.buffer, 1, &vertexCopy);
+
+        //index data
+		VkBufferCopy indexCopy{ 0 };
+		indexCopy.dstOffset = 0;
+		indexCopy.srcOffset = vertexBufferSize; //after vertex data in staging buffer
+		indexCopy.size = indexBufferSize;
+		vkCmdCopyBuffer(cmd, staging.buffer, newSurface.indexBuffer.buffer, 1, &indexCopy); });
+
+    destroy_buffer(staging);
+
+    return newSurface;
+}
+
+AllocatedBuffer VulkanEngine::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
+{
+    // Buffer allocation info for vulkan
+    VkBufferCreateInfo bufferInfo = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bufferInfo.pNext = nullptr;
+    bufferInfo.size = allocSize;
+    bufferInfo.usage = usage;
+
+    // allocation info for VMA
+    VmaAllocationCreateInfo vmaallocInfo = {};
+    vmaallocInfo.usage = memoryUsage;                      // we can control where VMA will put the buffer
+    vmaallocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT; // Map the pointer automiatically so we cna write to the memory, as long as buffer
+    // is accasasble from CPU. Will be stored in newBuffer.info
+
+    // allocate the buffer
+    AllocatedBuffer newBuffer;
+    VK_CHECK(vmaCreateBuffer(_allocator, &bufferInfo, &vmaallocInfo, &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info));
+
+    return newBuffer;
+}
+
+void VulkanEngine::destroy_buffer(const AllocatedBuffer &buffer)
+{
+    vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
+}
+
 AllocatedImage VulkanEngine::create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped)
 {
 	AllocatedImage newImage; //the goal is to fill all 5 of its fields
@@ -1210,4 +1237,111 @@ void VulkanEngine::destroy_image(const AllocatedImage &img)
 {
     vkDestroyImageView(_device, img.imageView, nullptr);
     vmaDestroyImage(_allocator, img.image, img.allocation);
+}
+
+
+//---------------------------------------------------------------------------------------------
+//-----------------------------GLTFMetallic_Roughness------------------------------------------
+//---------------------------------------------------------------------------------------------
+
+void GLTFMetallic_Roughness::build_pipelines(VulkanEngine *engine)
+{
+    VkShaderModule meshFragShader;
+	if (!vkutil::load_shader_module("shaders/mesh.frag.spv", engine->_device, &meshFragShader)) 
+    {
+		fmt::println("Error when building the triangle fragment shader module\n");
+	}
+
+	VkShaderModule meshVertexShader;
+	if (!vkutil::load_shader_module("shaders/mesh.vert.spv", engine->_device, &meshVertexShader)) 
+    {
+		fmt::println("Error when building the triangle vertex shader module\n");
+	}
+
+    //push constants----------------------------
+	VkPushConstantRange matrixRange{};
+	matrixRange.offset = 0;
+	matrixRange.size = sizeof(GPUDrawPushConstants);
+	matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    //descriptor set layout for material----------------------------
+    DescriptorLayoutBuilder layoutBuilder;
+    layoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    layoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+	layoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    materialLayout = layoutBuilder.build(engine->_device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    //0:_gpuSceneDataDescriptorLayout has layout for per-frame like matrices etc.
+    //1: materialLayout has layout for materials
+	VkDescriptorSetLayout layouts[] = { engine->_gpuSceneDataDescriptorLayout, materialLayout};
+
+    //create the pipeline layout with our push constants/descriptor layouts
+	VkPipelineLayoutCreateInfo mesh_layout_info = vkinit::pipeline_layout_create_info();
+	mesh_layout_info.setLayoutCount = 2; //2 descriptor sets for this pipeline. (one for material, one for per-frame)
+	mesh_layout_info.pSetLayouts = layouts;
+	mesh_layout_info.pPushConstantRanges = &matrixRange; //push constants are for per-object like worldMatrix
+	mesh_layout_info.pushConstantRangeCount = 1;
+	VkPipelineLayout newLayout;
+	VK_CHECK(vkCreatePipelineLayout(engine->_device, &mesh_layout_info, nullptr, &newLayout));
+
+    //both pipelines will use the same layout.
+    opaquePipeline.layout = newLayout;
+    transparentPipeline.layout = newLayout;
+
+	// build the stage-create-info for both vertex and fragment stages. This lets
+	// the pipeline know the shader modules per stage
+	PipelineBuilder pipelineBuilder;
+	pipelineBuilder.set_shaders(meshVertexShader, meshFragShader);
+	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
+	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+	pipelineBuilder.set_multisampling_none();
+	pipelineBuilder.disable_blending();
+	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
+
+	//render format
+	pipelineBuilder.set_color_attachment_format(engine->_drawImage.imageFormat);
+	pipelineBuilder.set_depth_format(engine->_depthImage.imageFormat);
+
+	// use the layout we created
+	pipelineBuilder._pipelineLayout = newLayout;
+
+	// finally build the pipeline
+    opaquePipeline.pipeline = pipelineBuilder.build_pipeline(engine->_device);
+
+	// create the transparent variant
+	pipelineBuilder.enable_blending_additive();
+
+	pipelineBuilder.enable_depthtest(false, VK_COMPARE_OP_GREATER_OR_EQUAL);
+
+	transparentPipeline.pipeline = pipelineBuilder.build_pipeline(engine->_device);
+	
+	vkDestroyShaderModule(engine->_device, meshFragShader, nullptr);
+	vkDestroyShaderModule(engine->_device, meshVertexShader, nullptr);
+}
+
+MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources &resources, DescriptorAllocatorGrowable &descriptorAllocator)
+{
+    MaterialInstance matData;
+	matData.passType = pass;
+	if (pass == MaterialPass::Transparent) 
+    {
+		matData.pipeline = &transparentPipeline;
+	}
+	else 
+    {
+		matData.pipeline = &opaquePipeline;
+	}
+    //allocate descriptor set for material
+    //note: the descriptor set for per frame resources will be created duing the render loop.
+	matData.materialSet = descriptorAllocator.allocate(device, materialLayout);
+
+	writer.clear();
+	writer.write_buffer(0, resources.dataBuffer, sizeof(MaterialConstants), resources.dataBufferOffset, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+	writer.write_image(1, resources.colorImage.imageView, resources.colorSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+	writer.write_image(2, resources.metalRoughImage.imageView, resources.metalRoughSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+	writer.update_set(device, matData.materialSet);
+
+	return matData;
 }

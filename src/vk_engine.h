@@ -60,6 +60,42 @@ struct ComputeEffect
 	ComputePushConstants data;
 };
 
+struct GLTFMetallic_Roughness 
+{
+	MaterialPipeline opaquePipeline;
+	MaterialPipeline transparentPipeline;
+
+	VkDescriptorSetLayout materialLayout;
+
+	//to be written into UBO
+	struct MaterialConstants 
+	{
+		glm::vec4 colorFactors;
+		glm::vec4 metal_rough_factors;
+		//padding, we need it anyway for uniform buffers
+		glm::vec4 extra[14];
+	};
+
+	//for descriptor set
+	struct MaterialResources 
+	{
+		AllocatedImage colorImage;
+		VkSampler colorSampler;
+		AllocatedImage metalRoughImage;
+		VkSampler metalRoughSampler;
+		VkBuffer dataBuffer; //MaterialConstants ^
+		uint32_t dataBufferOffset;
+	};
+
+	DescriptorWriter writer;
+
+	void build_pipelines(VulkanEngine* engine);
+	void clear_resources(VkDevice device);
+
+	//Build descriptor sets from materialLayout and bind resources from MaterialResources
+	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
+};
+
 
 constexpr unsigned int FRAME_OVERLAP = 2;
 
@@ -116,7 +152,7 @@ public:
 	VmaAllocator _allocator;
 
 	//descriptors
-	DescriptorAllocator globalDescriptorAllocator;
+	DescriptorAllocatorGrowable globalDescriptorAllocator;
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
@@ -144,6 +180,10 @@ public:
 	AllocatedImage _errorCheckerboardImage;
     VkSampler _defaultSamplerLinear;
 	VkSampler _defaultSamplerNearest;
+
+	//material
+	MaterialInstance defaultData;
+	GLTFMetallic_Roughness metalRoughMaterial;
 
 
 	//initializes everything in the engine

@@ -75,3 +75,35 @@ struct GPUSceneData
     glm::vec4 sunlightColor;
 };
 
+enum class MaterialPass : uint8_t 
+{
+    MainColor,
+    Transparent,
+    Other
+};
+
+struct MaterialPipeline 
+{
+	VkPipeline pipeline;
+	VkPipelineLayout layout;
+};
+
+struct MaterialInstance 
+{
+    MaterialPipeline* pipeline;
+    VkDescriptorSet materialSet;
+    MaterialPass passType;
+};
+
+struct RenderObject 
+{
+    uint32_t indexCount;
+    uint32_t firstIndex;
+    VkBuffer indexBuffer;
+    
+    MaterialInstance* material;
+
+    glm::mat4 transform;
+    VkDeviceAddress vertexBufferAddress;
+};
+
