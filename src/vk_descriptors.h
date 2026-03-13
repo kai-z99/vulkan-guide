@@ -28,3 +28,50 @@ struct DescriptorAllocator
 
     VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
 };
+
+struct DescriptorAllocatorGrowable 
+{
+public:
+	struct PoolSizeRatio 
+    {
+		VkDescriptorType type;
+		float ratio;
+	};
+
+	void init(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios);
+	void clear_pools(VkDevice device);
+	void destroy_pools(VkDevice device);
+
+    VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout, void* pNext = nullptr);
+
+private:
+    //get a pool from readyPools and try to allocate from it. 
+    // if it succeeds , put back in readyPools
+    // if it fails, put in fullPools and try again
+	VkDescriptorPool get_pool(VkDevice device); 
+
+    //allocate some amount of descriptors for each desciprtor type specified.
+    //eg: 5 uniform buffers, 10 SSBOs, ....  
+	VkDescriptorPool create_pool(VkDevice device, uint32_t setCount, std::span<PoolSizeRatio> poolRatios);
+
+	std::vector<PoolSizeRatio> ratios;
+	std::vector<VkDescriptorPool> fullPools; //pools that we cant allocate from anymore
+	std::vector<VkDescriptorPool> readyPools;//pools that we CAN
+	uint32_t setsPerPool;
+
+};
+
+
+//easily make and use VkWriteDescriptorSet to update descriptor set bindings
+struct DescriptorWriter 
+{
+    std::deque<VkDescriptorImageInfo> imageInfos;
+    std::deque<VkDescriptorBufferInfo> bufferInfos;
+    std::vector<VkWriteDescriptorSet> writes;
+
+    void write_image(int binding,VkImageView image,VkSampler sampler , VkImageLayout layout, VkDescriptorType type);
+    void write_buffer(int binding,VkBuffer buffer,size_t size, size_t offset,VkDescriptorType type); 
+
+    void clear();
+    void update_set(VkDevice device, VkDescriptorSet set);
+};

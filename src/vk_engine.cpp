@@ -297,7 +297,8 @@ void VulkanEngine::init_descriptors()
     // each descriptor set will have 1 image descriptor. Shape/layout not known yet.
     std::vector<DescriptorAllocator::PoolSizeRatio> sizes =
         {
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1}};
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1} //desciptor type is an image resource
+        };
     // 10 descriptor sets in total can be allocated from this pool.
     globalDescriptorAllocator.init_pool(_device, 10, sizes);
 
@@ -316,20 +317,16 @@ void VulkanEngine::init_descriptors()
 
     //---------4. write the image into the descriptor set we allocated.--------------------------------
     // Since we know the shape, (1 image at binding index 0), we finally actually bind our image there.
-    VkWriteDescriptorSet drawImageWrite = {};
-    drawImageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    drawImageWrite.pNext = nullptr;
-    drawImageWrite.dstBinding = 0;                 // binding 0
-    drawImageWrite.dstSet = _drawImageDescriptors; // descriptor set we just allocated
-    drawImageWrite.descriptorCount = 1;
-    drawImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    VkDescriptorImageInfo imgInfo{}; // actual image data
-    imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imgInfo.imageView = _drawImage.imageView;
-    drawImageWrite.pImageInfo = &imgInfo; // actual image data
 
-    // update the descriptor set with our image.
-    vkUpdateDescriptorSets(_device, 1, &drawImageWrite, 0, nullptr);
+    DescriptorWriter writer;
+
+    writer.write_image(0, 
+        _drawImage.imageView, 
+        VK_NULL_HANDLE, 
+        VK_IMAGE_LAYOUT_GENERAL,            //usage state: compute shader
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); //descriptor type is an image resource
+    
+    writer.update_set(_device, _drawImageDescriptors);
 
     //---------5. cleanup.--------------------------------
     // make sure both the descriptor allocator and the new layout get cleaned up properly
@@ -706,6 +703,7 @@ void VulkanEngine::draw()
     //  a max of 1 second.
     //  We signal swapChainSemaphore, so we know we can render into it later.
     //
+    //Note that vkAcquireNextImageKHR expects swapchain size to be compatible with window size. If not it will return e.
     VkResult e = vkAcquireNextImageKHR(_device, _swapchain, 1000000000, get_current_frame()._swapchainSemaphore, nullptr, &swapchainImageIndex);
     if (e == VK_ERROR_OUT_OF_DATE_KHR || e == VK_SUBOPTIMAL_KHR)
     {
@@ -792,6 +790,8 @@ void VulkanEngine::draw()
     presentInfo.pWaitSemaphores = &get_current_frame()._renderSemaphore;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pImageIndices = &swapchainImageIndex;
+
+    //Note that vkQueuePresentKHR expects swapchain size to be compatible with window size. If not it will return error/suboptimal.
     VkResult presentResult = vkQueuePresentKHR(_graphicsQueue, &presentInfo);
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
     {
