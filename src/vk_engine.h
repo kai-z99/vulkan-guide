@@ -37,6 +37,7 @@ struct FrameData
 	VkFence _renderFence;
 
 	DeletionQueue _deletionQueue;
+	DescriptorAllocatorGrowable _frameDescriptors;
 };
 
 struct ComputePushConstants 
@@ -47,6 +48,8 @@ struct ComputePushConstants
 	glm::vec4 data4;
 };
 
+
+
 struct ComputeEffect 
 {
     const char* name;
@@ -56,6 +59,7 @@ struct ComputeEffect
 
 	ComputePushConstants data;
 };
+
 
 constexpr unsigned int FRAME_OVERLAP = 2;
 
@@ -127,6 +131,10 @@ public:
 	VkPipeline _meshPipeline;
 	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
+
+	//scene
+	GPUSceneData sceneData;
+	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
 
 
 	//initializes everything in the engine

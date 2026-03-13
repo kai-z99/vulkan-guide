@@ -334,6 +334,35 @@ void VulkanEngine::init_descriptors()
                                      {
         globalDescriptorAllocator.destroy_pool(_device);
         vkDestroyDescriptorSetLayout(_device, _drawImageDescriptorLayout, nullptr); });
+
+
+    //per frame descriptor allocator
+	for (int i = 0; i < FRAME_OVERLAP; i++) 
+    {
+		// create a descriptor pool
+		std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = 
+        { 
+			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3 }, //3 images
+			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 }, //3 ssbos
+			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 }, //3 ubos
+			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 }, //4 combined
+		};
+
+		_frames[i]._frameDescriptors = DescriptorAllocatorGrowable{};
+		_frames[i]._frameDescriptors.init(_device, 1000, frame_sizes);
+	
+		_mainDeletionQueue.push_function([&, i]() 
+        {
+			_frames[i]._frameDescriptors.destroy_pools(_device);
+		});
+	}
+
+    //we will create the following descriptor set every frame, so just do the layout for now.
+    {
+        DescriptorLayoutBuilder builder;
+        builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER); //ubo
+        _gpuSceneDataDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
 }
 
 void VulkanEngine::init_pipelines()
@@ -430,21 +459,21 @@ void VulkanEngine::init_mesh_pipeline()
     VkShaderModule triangleFragShader;
     if (!vkutil::load_shader_module("shaders/colored_triangle.frag.spv", _device, &triangleFragShader))
     {
-        fmt::print("Error when building the triangle fragment shader module");
+        fmt::print("Error when building the triangle fragment shader module\n");
     }
     else
     {
-        fmt::print("Triangle fragment shader succesfully loaded");
+        fmt::print("Triangle fragment shader succesfully loaded\n");
     }
 
     VkShaderModule triangleVertexShader;
     if (!vkutil::load_shader_module("shaders/colored_triangle_mesh.vert.spv", _device, &triangleVertexShader))
     {
-        fmt::print("Error when building the triangle vertex shader module");
+        fmt::print("Error when building the triangle vertex shader module\n");
     }
     else
     {
-        fmt::print("Triangle vertex shader succesfully loaded");
+        fmt::print("Triangle vertex shader succesfully loaded\n");
     }
 
     VkPushConstantRange bufferRange{};
@@ -669,7 +698,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     scissor.extent.height = _drawExtent.height;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // update push constants (buffer pointer and world matrix)
+    // update push constants (buffer pointer and world matrix)-------------------------------------------
     GPUDrawPushConstants push_constants;
 
     glm::mat4 view = glm::translate(glm::vec3{0, 0, -5}) * glm::rotate(_frameNumber / 60.0f, glm::vec3(0, 1, 0));
@@ -680,6 +709,27 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     projection[1][1] *= -1;
     push_constants.worldMatrix = projection * view;
     push_constants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress; // index 2 is monke
+    //------------------------------------------------------------------------------------------
+
+
+    //allocate a new UBO for the scene data
+	AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+	//add it to the deletion queue of this frame so it gets deleted once its been used
+	get_current_frame()._deletionQueue.push_function([=, this]() 
+    {
+		destroy_buffer(gpuSceneDataBuffer);
+	});
+
+	//write the buffer
+	GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData(); //get cpu pointer to buffer mem
+	*sceneUniformData = sceneData; //set buffer mem to our cpu side scene data
+
+	//create a descriptor set that binds that buffer and update it
+	VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(_device, _gpuSceneDataDescriptorLayout);
+	DescriptorWriter writer;
+	writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+	writer.update_set(_device, globalDescriptor); //tell desciptor that index 0 is our UBO
 
     // draw mesh
     vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
@@ -695,7 +745,9 @@ void VulkanEngine::draw()
     // note, renderfence starts signalled on frame 0.
     VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
 
-    get_current_frame()._deletionQueue.flush(); // cleanup per frame resources
+    // cleanup per frame resources
+    get_current_frame()._deletionQueue.flush(); 
+    get_current_frame()._frameDescriptors.clear_pools(_device);
 
     // request image from the swap chain
     uint32_t swapchainImageIndex;
